@@ -158,6 +158,16 @@ def download_component(
     return resp.text
 
 
+def _fetch_readme(source: str, version: str, name: str, sha: str | None, token: str | None) -> str | None:
+    """Fetch README.md from the component subdirectory, or return None if absent."""
+    try:
+        return download_component(source, version, f"templates/{name}/README.md", sha, token)
+    except DownloadError as exc:
+        if "HTTP 404" in str(exc):
+            return None
+        raise
+
+
 def _fetch_component(source: str, version: str, name: str, sha: str | None, token: str | None) -> str:
     """Download a component, trying single-file then directory layout per GitLab spec."""
     single = f"templates/{name}.yml"
@@ -275,6 +285,19 @@ def cmd_pull(args, env: dict) -> int:
         local_path.parent.mkdir(parents=True, exist_ok=True)
         local_path.write_text(content)
         print(f"[pull] {comp['component']} @ {comp['version']}")
+
+        readme = _fetch_readme(
+            source=comp["source"],
+            version=comp["version"],
+            name=comp["component"],
+            sha=comp.get("sha"),
+            token=token,
+        )
+        if readme is not None:
+            readme_path = cwd / args.components_dir / comp["component"] / "README.md"
+            readme_path.parent.mkdir(parents=True, exist_ok=True)
+            readme_path.write_text(readme)
+            print(f"[pull] {comp['component']}/README.md")
 
     if getattr(args, "commit", False) and rc == 0:
         rc = _commit_changes(args.components_dir, env)

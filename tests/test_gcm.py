@@ -12,6 +12,7 @@ from gcm import (
     parse_annotations,
     download_component,
     _fetch_component,
+    _fetch_readme,
     cmd_pull,
     cmd_list,
     cmd_diff,
@@ -227,8 +228,9 @@ def test_cmd_pull_writes_files(tmp_path):
     args = _make_pull_args(tmp_path)
 
     with patch("gcm._fetch_component", return_value="component content"):
-        with patch("gcm.os.getcwd", return_value=str(tmp_path)):
-            rc = cmd_pull(args, {"GCM_TOKEN": None})
+        with patch("gcm._fetch_readme", return_value=None):
+            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+                rc = cmd_pull(args, {"GCM_TOKEN": None})
 
     assert rc == 0
     written = tmp_path / "templates" / "gitlab-ci-azure.yml"
@@ -244,8 +246,9 @@ def test_cmd_pull_cleans_stale_files(tmp_path):
     args = _make_pull_args(tmp_path)
 
     with patch("gcm._fetch_component", return_value="new content"):
-        with patch("gcm.os.getcwd", return_value=str(tmp_path)):
-            rc = cmd_pull(args, {})
+        with patch("gcm._fetch_readme", return_value=None):
+            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+                rc = cmd_pull(args, {})
 
     assert rc == 0
     assert not stale.exists()
@@ -257,8 +260,9 @@ def test_cmd_pull_creates_parent_dirs(tmp_path):
     args.components_dir = "nested/vendor/templates"
 
     with patch("gcm._fetch_component", return_value="data"):
-        with patch("gcm.os.getcwd", return_value=str(tmp_path)):
-            rc = cmd_pull(args, {})
+        with patch("gcm._fetch_readme", return_value=None):
+            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+                rc = cmd_pull(args, {})
 
     assert rc == 0
     assert (tmp_path / "nested" / "vendor" / "templates" / "gitlab-ci-azure.yml").exists()
@@ -282,8 +286,9 @@ include:
         return "docker content"
 
     with patch("gcm._fetch_component", side_effect=side_effect):
-        with patch("gcm.os.getcwd", return_value=str(tmp_path)):
-            rc = cmd_pull(args, {})
+        with patch("gcm._fetch_readme", return_value=None):
+            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+                rc = cmd_pull(args, {})
 
     assert rc == 1
     assert (tmp_path / "templates" / "gitlab-ci-docker.yml").exists()
@@ -547,9 +552,10 @@ def test_cmd_pull_with_commit_flag(tmp_path, capsys):
 
     side_effects = [_git_result(0), _git_result(1), _git_result(0)]  # add, diff, commit
     with patch("gcm._fetch_component", return_value="content"):
-        with patch("gcm.os.getcwd", return_value=str(tmp_path)):
-            with patch("gcm.subprocess.run", side_effect=side_effects):
-                rc = cmd_pull(args, {})
+        with patch("gcm._fetch_readme", return_value=None):
+            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+                with patch("gcm.subprocess.run", side_effect=side_effects):
+                    rc = cmd_pull(args, {})
 
     assert rc == 0
     assert (tmp_path / "templates" / "gitlab-ci-azure.yml").exists()
@@ -593,6 +599,57 @@ def test_fetch_component_auth_error():
         with pytest.raises(DownloadError, match="403"):
             _fetch_component("https://gitlab.example.com/org/proj", "1.0", "my-comp", None, None)
     assert mock_get.call_count == 1  # no retry on non-404
+
+
+# ---------------------------------------------------------------------------
+# _fetch_readme
+# ---------------------------------------------------------------------------
+
+def test_fetch_readme_success():
+    with patch("gcm.requests.get", return_value=_http(200, "# README")) as mock_get:
+        result = _fetch_readme("https://gitlab.example.com/org/proj", "1.0", "my-comp", None, None)
+    assert result == "# README"
+    assert "templates%2Fmy-comp%2FREADME.md" in mock_get.call_args[0][0]
+
+
+def test_fetch_readme_not_found():
+    with patch("gcm.requests.get", return_value=_http(404)):
+        result = _fetch_readme("https://gitlab.example.com/org/proj", "1.0", "my-comp", None, None)
+    assert result is None
+
+
+def test_fetch_readme_other_error():
+    with patch("gcm.requests.get", return_value=_http(403)):
+        with pytest.raises(DownloadError, match="403"):
+            _fetch_readme("https://gitlab.example.com/org/proj", "1.0", "my-comp", None, None)
+
+
+def test_cmd_pull_downloads_readme(tmp_path):
+    args = _make_pull_args(tmp_path)
+
+    with patch("gcm._fetch_component", return_value="component content"):
+        with patch("gcm._fetch_readme", return_value="# Component README"):
+            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+                rc = cmd_pull(args, {})
+
+    assert rc == 0
+    assert (tmp_path / "templates" / "gitlab-ci-azure.yml").exists()
+    readme = tmp_path / "templates" / "gitlab-ci-azure" / "README.md"
+    assert readme.exists()
+    assert readme.read_text() == "# Component README"
+
+
+def test_cmd_pull_no_readme(tmp_path):
+    args = _make_pull_args(tmp_path)
+
+    with patch("gcm._fetch_component", return_value="component content"):
+        with patch("gcm._fetch_readme", return_value=None):
+            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+                rc = cmd_pull(args, {})
+
+    assert rc == 0
+    assert (tmp_path / "templates" / "gitlab-ci-azure.yml").exists()
+    assert not (tmp_path / "templates" / "gitlab-ci-azure").exists()
 
 
 # ---------------------------------------------------------------------------
