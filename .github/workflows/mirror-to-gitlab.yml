@@ -17,7 +17,6 @@ jobs:
       - name: Mirror push to GitLab
         env:
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
-          GITLAB_REPO: ${{ vars.GITLAB_MIRROR_REPO || github.repository }}
         run: |
-          git remote add gitlab "https://oauth2:${GITLAB_TOKEN}@gitlab.com/${GITLAB_REPO}.git"
+          git remote add gitlab "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Sheptykin/gitlab-component-manager.git"
           git push gitlab --mirror
