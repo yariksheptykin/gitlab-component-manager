@@ -117,36 +117,45 @@ pull options:
 
 ## GitLab CI integration
 
-Add this job to your `.gitlab-ci.yml`. Trigger it manually whenever you want to update vendored components. It fetches the pinned versions, commits the result into `templates/`, and pushes — so subsequent pipelines pick up the new component files from the current project.
+### Using the gcm CI component (recommended)
+
+This repository ships a GitLab CI component in `templates/sync/`. Because GitLab CI
+components must be hosted on a GitLab instance (GitHub is not supported), you need to
+mirror or fork this project to your own GitLab server first. Then include it with:
+
+```yaml
+include:
+  - component: gitlab.com/Sheptykin/gitlab-component-manager/sync@main
+    inputs:
+      push_token: $CI_PUSH_TOKEN        # token with write access to this repo
+      gcm_token: $YOUR_ORG_GCM_TOKEN   # token for private source projects (omit if public)
+```
+
+The component is mirrored from GitHub to `gitlab.com/Sheptykin/gitlab-component-manager`.
+If your pipeline runs on a private GitLab instance, mirror the project there and replace
+`gitlab.com/Sheptykin` with your own server and namespace.
+See [`templates/sync/README.md`](templates/sync/README.md) for the full input reference.
+
+### Manual job definition
+
+If you cannot use the component include (e.g. cross-instance restriction), add the job directly:
 
 ```yaml
 sync-ci-components:
   stage: .pre
-  image: ghcr.io/<github-username>/gitlab-component-manager:latest
+  image: ghcr.io/yariksheptykin/gitlab-component-manager:latest
   when: manual
   script:
-    - gcm diff
+    - gcm diff || true
     - gcm pull --commit
-    - git push "https://gcm-bot:${CI_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" HEAD:${CI_COMMIT_REF_NAME}
+    - git push "https://oauth2:${CI_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" HEAD:${CI_COMMIT_REF_NAME}
   variables:
     GCM_TOKEN: $YOUR_ORG_GCM_TOKEN
     GCM_GIT_USER_NAME: "GCM Bot"
     GCM_GIT_USER_EMAIL: "gcm-bot@your-org.com"
 ```
 
-`gcm pull --commit` only creates a commit when something changed. If nothing changed the push is a no-op. To let gcm handle the push as well, use `GCM_GIT_PUSH`:
-
-```yaml
-  script:
-    - gcm diff
-    - gcm pull --commit
-  variables:
-    GCM_TOKEN: $YOUR_ORG_GCM_TOKEN
-    GCM_GIT_USER_NAME: "GCM Bot"
-    GCM_GIT_USER_EMAIL: "gcm-bot@your-org.com"
-    GCM_GIT_PUSH: "1"
-    GCM_GIT_BRANCH: $CI_COMMIT_REF_NAME
-```
+`gcm pull --commit` only creates a commit when something changed; if nothing changed the push is a no-op.
 
 ---
 

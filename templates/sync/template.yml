@@ -1,0 +1,36 @@
+spec:
+  inputs:
+    stage:
+      default: ".pre"
+      description: "Pipeline stage for the sync job"
+    image:
+      default: "ghcr.io/yariksheptykin/gitlab-component-manager:latest"
+      description: "gcm Docker image"
+    gcm_token:
+      default: ""
+      description: >
+        GitLab API token for private component sources.
+        Leave empty if all source projects are public.
+    push_token:
+      description: >
+        Token with write access to this repository, used to push the vendor commit.
+        Pass a CI variable reference, e.g. $CI_PUSH_TOKEN.
+    git_user_name:
+      default: "GCM Bot"
+      description: "Git author name for the vendor commit"
+    git_user_email:
+      default: "gcm-bot@example.com"
+      description: "Git author email for the vendor commit"
+---
+sync-ci-components:
+  stage: $[[ inputs.stage ]]
+  image: $[[ inputs.image ]]
+  when: manual
+  script:
+    - gcm diff || true
+    - gcm pull --commit
+    - git push "https://oauth2:$[[ inputs.push_token ]]@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" HEAD:${CI_COMMIT_REF_NAME}
+  variables:
+    GCM_TOKEN: $[[ inputs.gcm_token ]]
+    GCM_GIT_USER_NAME: $[[ inputs.git_user_name ]]
+    GCM_GIT_USER_EMAIL: $[[ inputs.git_user_email ]]
