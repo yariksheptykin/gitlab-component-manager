@@ -159,6 +159,15 @@ sync-ci-components:
 
 ---
 
+## Contributing
+
+> **This GitLab repository is a read-only mirror.**
+> The source of truth is on GitHub: [github.com/yariksheptykin/gitlab-component-manager](https://github.com/yariksheptykin/gitlab-component-manager)
+>
+> Please open issues and pull requests there. Issues and MRs opened here will not be actioned.
+
+---
+
 ## Development setup
 
 ```bash
