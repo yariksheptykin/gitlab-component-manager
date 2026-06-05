@@ -227,10 +227,9 @@ def _git_result(returncode=0, stdout="", stderr=""):
 def test_cmd_pull_writes_files(tmp_path):
     args = _make_pull_args(tmp_path)
 
-    with patch("gcm._fetch_component", return_value="component content"):
-        with patch("gcm._fetch_readme", return_value=None):
-            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
-                rc = cmd_pull(args, {"GCM_TOKEN": None})
+    with patch("gcm._fetch_component", return_value=("component content", "single")):
+        with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+            rc = cmd_pull(args, {"GCM_TOKEN": None})
 
     assert rc == 0
     written = tmp_path / "templates" / "gitlab-ci-azure.yml"
@@ -245,10 +244,9 @@ def test_cmd_pull_cleans_stale_files(tmp_path):
 
     args = _make_pull_args(tmp_path)
 
-    with patch("gcm._fetch_component", return_value="new content"):
-        with patch("gcm._fetch_readme", return_value=None):
-            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
-                rc = cmd_pull(args, {})
+    with patch("gcm._fetch_component", return_value=("new content", "single")):
+        with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+            rc = cmd_pull(args, {})
 
     assert rc == 0
     assert not stale.exists()
@@ -259,10 +257,9 @@ def test_cmd_pull_creates_parent_dirs(tmp_path):
     args = _make_pull_args(tmp_path)
     args.components_dir = "nested/vendor/templates"
 
-    with patch("gcm._fetch_component", return_value="data"):
-        with patch("gcm._fetch_readme", return_value=None):
-            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
-                rc = cmd_pull(args, {})
+    with patch("gcm._fetch_component", return_value=("data", "single")):
+        with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+            rc = cmd_pull(args, {})
 
     assert rc == 0
     assert (tmp_path / "nested" / "vendor" / "templates" / "gitlab-ci-azure.yml").exists()
@@ -283,12 +280,11 @@ include:
     def side_effect(source, version, name, sha, token):
         if "azure" in source:
             raise DownloadError("HTTP 500")
-        return "docker content"
+        return "docker content", "single"
 
     with patch("gcm._fetch_component", side_effect=side_effect):
-        with patch("gcm._fetch_readme", return_value=None):
-            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
-                rc = cmd_pull(args, {})
+        with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+            rc = cmd_pull(args, {})
 
     assert rc == 1
     assert (tmp_path / "templates" / "gitlab-ci-docker.yml").exists()
@@ -330,7 +326,7 @@ def test_cmd_diff_up_to_date(tmp_path, capsys):
     args.ci_file = str(ci_file)
     args.components_dir = "templates"
 
-    with patch("gcm._fetch_component", return_value="same content"):
+    with patch("gcm._fetch_component", return_value=("same content", "single")):
         with patch("gcm.os.getcwd", return_value=str(tmp_path)):
             rc = cmd_diff(args, {})
 
@@ -350,7 +346,7 @@ def test_cmd_diff_changed(tmp_path, capsys):
     args.ci_file = str(ci_file)
     args.components_dir = "templates"
 
-    with patch("gcm._fetch_component", return_value="new content"):
+    with patch("gcm._fetch_component", return_value=("new content", "single")):
         with patch("gcm.os.getcwd", return_value=str(tmp_path)):
             rc = cmd_diff(args, {})
 
@@ -367,7 +363,7 @@ def test_cmd_diff_new(tmp_path, capsys):
     args.ci_file = str(ci_file)
     args.components_dir = "templates"
 
-    with patch("gcm._fetch_component", return_value="new content"):
+    with patch("gcm._fetch_component", return_value=("new content", "single")):
         with patch("gcm.os.getcwd", return_value=str(tmp_path)):
             rc = cmd_diff(args, {})
 
@@ -446,6 +442,60 @@ def test_cmd_diff_download_error(tmp_path, capsys):
             rc = cmd_diff(args, {})
 
     assert rc == 1
+
+
+def test_cmd_pull_directory_layout(tmp_path):
+    args = _make_pull_args(tmp_path)
+
+    with patch("gcm._fetch_component", return_value=("template content", "directory")):
+        with patch("gcm._fetch_readme", return_value=None):
+            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+                rc = cmd_pull(args, {})
+
+    assert rc == 0
+    written = tmp_path / "templates" / "gitlab-ci-azure" / "template.yml"
+    assert written.exists()
+    assert written.read_text() == "template content"
+    assert not (tmp_path / "templates" / "gitlab-ci-azure.yml").exists()
+
+
+def test_cmd_diff_directory_layout_up_to_date(tmp_path, capsys):
+    ci_file = tmp_path / ".gitlab-ci.yml"
+    ci_file.write_text(PULL_CI_CONTENT)
+    local_file = tmp_path / "templates" / "gitlab-ci-azure" / "template.yml"
+    local_file.parent.mkdir(parents=True)
+    local_file.write_text("same content")
+
+    args = MagicMock()
+    args.ci_file = str(ci_file)
+    args.components_dir = "templates"
+
+    with patch("gcm._fetch_component", return_value=("same content", "directory")):
+        with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+            rc = cmd_diff(args, {})
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "[up-to-date]" in out
+    assert "gitlab-ci-azure/template.yml" in out
+
+
+def test_cmd_diff_directory_layout_new(tmp_path, capsys):
+    ci_file = tmp_path / ".gitlab-ci.yml"
+    ci_file.write_text(PULL_CI_CONTENT)
+
+    args = MagicMock()
+    args.ci_file = str(ci_file)
+    args.components_dir = "templates"
+
+    with patch("gcm._fetch_component", return_value=("content", "directory")):
+        with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+            rc = cmd_diff(args, {})
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "[new]" in out
+    assert "gitlab-ci-azure/template.yml" in out
 
 
 def test_main_dispatches_subcommand(tmp_path):
@@ -551,11 +601,10 @@ def test_cmd_pull_with_commit_flag(tmp_path, capsys):
     args.commit = True
 
     side_effects = [_git_result(0), _git_result(1), _git_result(0)]  # add, diff, commit
-    with patch("gcm._fetch_component", return_value="content"):
-        with patch("gcm._fetch_readme", return_value=None):
-            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
-                with patch("gcm.subprocess.run", side_effect=side_effects):
-                    rc = cmd_pull(args, {})
+    with patch("gcm._fetch_component", return_value=("content", "single")):
+        with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+            with patch("gcm.subprocess.run", side_effect=side_effects):
+                rc = cmd_pull(args, {})
 
     assert rc == 0
     assert (tmp_path / "templates" / "gitlab-ci-azure.yml").exists()
@@ -574,16 +623,18 @@ def _http(status, text=""):
 
 def test_fetch_component_single_file():
     with patch("gcm.requests.get", return_value=_http(200, "single content")) as mock_get:
-        result = _fetch_component("https://gitlab.example.com/org/proj", "1.0", "my-comp", None, None)
-    assert result == "single content"
+        content, layout = _fetch_component("https://gitlab.example.com/org/proj", "1.0", "my-comp", None, None)
+    assert content == "single content"
+    assert layout == "single"
     assert mock_get.call_count == 1
     assert "templates%2Fmy-comp.yml" in mock_get.call_args[0][0]
 
 
 def test_fetch_component_directory():
     with patch("gcm.requests.get", side_effect=[_http(404), _http(200, "dir content")]) as mock_get:
-        result = _fetch_component("https://gitlab.example.com/org/proj", "1.0", "my-comp", None, None)
-    assert result == "dir content"
+        content, layout = _fetch_component("https://gitlab.example.com/org/proj", "1.0", "my-comp", None, None)
+    assert content == "dir content"
+    assert layout == "directory"
     assert mock_get.call_count == 2
     assert "templates%2Fmy-comp%2Ftemplate.yml" in mock_get.call_args[0][0]
 
@@ -627,13 +678,13 @@ def test_fetch_readme_other_error():
 def test_cmd_pull_downloads_readme(tmp_path):
     args = _make_pull_args(tmp_path)
 
-    with patch("gcm._fetch_component", return_value="component content"):
+    with patch("gcm._fetch_component", return_value=("component content", "directory")):
         with patch("gcm._fetch_readme", return_value="# Component README"):
             with patch("gcm.os.getcwd", return_value=str(tmp_path)):
                 rc = cmd_pull(args, {})
 
     assert rc == 0
-    assert (tmp_path / "templates" / "gitlab-ci-azure.yml").exists()
+    assert (tmp_path / "templates" / "gitlab-ci-azure" / "template.yml").exists()
     readme = tmp_path / "templates" / "gitlab-ci-azure" / "README.md"
     assert readme.exists()
     assert readme.read_text() == "# Component README"
@@ -642,14 +693,27 @@ def test_cmd_pull_downloads_readme(tmp_path):
 def test_cmd_pull_no_readme(tmp_path):
     args = _make_pull_args(tmp_path)
 
-    with patch("gcm._fetch_component", return_value="component content"):
+    with patch("gcm._fetch_component", return_value=("component content", "directory")):
         with patch("gcm._fetch_readme", return_value=None):
             with patch("gcm.os.getcwd", return_value=str(tmp_path)):
                 rc = cmd_pull(args, {})
 
     assert rc == 0
+    assert (tmp_path / "templates" / "gitlab-ci-azure" / "template.yml").exists()
+    assert not (tmp_path / "templates" / "gitlab-ci-azure" / "README.md").exists()
+
+
+def test_cmd_pull_single_layout_no_readme_fetch(tmp_path):
+    args = _make_pull_args(tmp_path)
+
+    with patch("gcm._fetch_component", return_value=("component content", "single")):
+        with patch("gcm._fetch_readme") as mock_readme:
+            with patch("gcm.os.getcwd", return_value=str(tmp_path)):
+                rc = cmd_pull(args, {})
+
+    assert rc == 0
     assert (tmp_path / "templates" / "gitlab-ci-azure.yml").exists()
-    assert not (tmp_path / "templates" / "gitlab-ci-azure").exists()
+    mock_readme.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

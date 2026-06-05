@@ -168,16 +168,23 @@ def _fetch_readme(source: str, version: str, name: str, sha: str | None, token: 
         raise
 
 
-def _fetch_component(source: str, version: str, name: str, sha: str | None, token: str | None) -> str:
-    """Download a component, trying single-file then directory layout per GitLab spec."""
+def _fetch_component(source: str, version: str, name: str, sha: str | None, token: str | None) -> tuple[str, str]:
+    """Download a component, trying single-file then directory layout per GitLab spec.
+
+    Returns (content, layout) where layout is 'single' or 'directory'.
+    """
     single = f"templates/{name}.yml"
     directory = f"templates/{name}/template.yml"
-    for path in (single, directory):
-        try:
-            return download_component(source, version, path, sha, token)
-        except DownloadError as exc:
-            if "HTTP 404" not in str(exc):
-                raise
+    try:
+        return download_component(source, version, single, sha, token), "single"
+    except DownloadError as exc:
+        if "HTTP 404" not in str(exc):
+            raise
+    try:
+        return download_component(source, version, directory, sha, token), "directory"
+    except DownloadError as exc:
+        if "HTTP 404" not in str(exc):
+            raise
     raise DownloadError(
         f"Component '{name}' not found in {source} at ref {sha or version} "
         f"(tried {single} and {directory})"
@@ -268,9 +275,8 @@ def cmd_pull(args, env: dict) -> int:
     _clean_components_dir(cwd / args.components_dir)
     rc = 0
     for comp in components:
-        local_path = cwd / args.components_dir / f"{comp['component']}.yml"
         try:
-            content = _fetch_component(
+            content, layout = _fetch_component(
                 source=comp["source"],
                 version=comp["version"],
                 name=comp["component"],
@@ -282,22 +288,28 @@ def cmd_pull(args, env: dict) -> int:
             rc = 1
             continue
 
+        if layout == "single":
+            local_path = cwd / args.components_dir / f"{comp['component']}.yml"
+        else:
+            local_path = cwd / args.components_dir / comp["component"] / "template.yml"
+
         local_path.parent.mkdir(parents=True, exist_ok=True)
         local_path.write_text(content)
         print(f"[pull] {comp['component']} @ {comp['version']}")
 
-        readme = _fetch_readme(
-            source=comp["source"],
-            version=comp["version"],
-            name=comp["component"],
-            sha=comp.get("sha"),
-            token=token,
-        )
-        if readme is not None:
-            readme_path = cwd / args.components_dir / comp["component"] / "README.md"
-            readme_path.parent.mkdir(parents=True, exist_ok=True)
-            readme_path.write_text(readme)
-            print(f"[pull] {comp['component']}/README.md")
+        if layout == "directory":
+            readme = _fetch_readme(
+                source=comp["source"],
+                version=comp["version"],
+                name=comp["component"],
+                sha=comp.get("sha"),
+                token=token,
+            )
+            if readme is not None:
+                readme_path = cwd / args.components_dir / comp["component"] / "README.md"
+                readme_path.parent.mkdir(parents=True, exist_ok=True)
+                readme_path.write_text(readme)
+                print(f"[pull] {comp['component']}/README.md")
 
     if getattr(args, "commit", False) and rc == 0:
         rc = _commit_changes(args.components_dir, env)
@@ -357,9 +369,8 @@ def cmd_diff(args, env: dict) -> int:
     cwd = Path(os.getcwd())
     rc = 0
     for comp in components:
-        local_path = cwd / args.components_dir / f"{comp['component']}.yml"
         try:
-            remote_content = _fetch_component(
+            remote_content, layout = _fetch_component(
                 source=comp["source"],
                 version=comp["version"],
                 name=comp["component"],
@@ -371,7 +382,13 @@ def cmd_diff(args, env: dict) -> int:
             rc = 1
             continue
 
-        label = f"{comp['component']}.yml"
+        if layout == "single":
+            local_path = cwd / args.components_dir / f"{comp['component']}.yml"
+            label = f"{comp['component']}.yml"
+        else:
+            local_path = cwd / args.components_dir / comp["component"] / "template.yml"
+            label = f"{comp['component']}/template.yml"
+
         if not local_path.exists():
             print(f"[new]      {label}")
             rc = 1
